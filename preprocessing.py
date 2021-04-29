@@ -1,0 +1,60 @@
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--train-test-split-ratio',
+type=float, default=0.3)
+args, _ = parser.parse_known_args()
+print('Received arguments {}'.format(args))
+split_ratio = args.train_test_split_ratio
+import os
+import pandas as pd
+input_data_path = os.path.join('/opt/ml/processing/input', 'bank-additional-full.csv')
+df = pd.read_csv(input_data_path, sep=";")
+df.dropna(inplace=True)
+df.drop_duplicates(inplace=True)
+
+one_class = df[df['y']=='yes']
+one_class_count = one_class.shape[0]
+zero_class = df[df['y']=='no']
+zero_class_count = zero_class.shape[0]
+zero_to_one_ratio = zero_class_count/one_class_count
+print("Ratio: %.2f" % zero_to_one_ratio)
+
+import numpy as np
+df['no_previous_contact'] = np.where(df['pdays'] == 999,1, 0)
+
+df['not_working'] = np.where(np.in1d(df['job'],['student', 'retired', 'unemployed']), 1, 0)
+
+
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(df.drop('y', axis=1),df['y'],test_size=split_ratio, random_state=0)
+
+from sklearn.compose import make_column_transformer
+from sklearn.preprocessing import StandardScaler,OneHotEncoder
+preprocess = make_column_transformer(
+(['age', 'duration', 'campaign', 'pdays', 'previous'],
+StandardScaler()),
+(['job', 'marital', 'education', 'default', 'housing',
+'loan','contact', 'month', 'day_of_week',
+'poutcome'],
+OneHotEncoder(sparse=False))
+)
+
+
+train_features = preprocess.fit_transform(X_train)
+test_features = preprocess.transform(X_test)
+
+train_features_output_path = os.path.join('/opt/ml/processing/train', 'train_features.csv')
+train_labels_output_path = os.path.join('/opt/ml/processing/train', 'train_labels.csv')
+test_features_output_path = os.path.join('/opt/ml/processing/test', 'test_features.csv')
+test_labels_output_path = os.path.join('/opt/ml/processing/test', 'test_labels.csv')
+
+pd.DataFrame(train_features).to_csv(train_features_output_path, header=False, index=False)
+pd.DataFrame(test_features).to_csv(test_features_output_path, header=False, index=False)
+y_train.to_csv(train_labels_output_path, header=False,index=False)
+y_test.to_csv(test_labels_output_path, header=False,index=False)
+
+
+
+from sagemaker.processing import ProcessingInput,ProcessingOutput
+sklearn_processor.run( code='preprocessing.py', inputs=[ProcessingInput(
+ source=input_data,destination='/opt/ml/processing/input')],outputs=[ ProcessingOutput( source='/opt/ml/processing/train',output_name='train_data'),ProcessingOutput(source='/opt/ml/processing/test',output_name='test_data')],arguments['--train-test-split-ratio', '0.2'])
